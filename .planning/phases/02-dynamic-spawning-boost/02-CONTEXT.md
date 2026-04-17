@@ -19,7 +19,7 @@ This phase addresses the implementation of the special "Boost" lantern type, the
   - Stage 1: 1.0% chance per spawn.
   - Stage 2: 0.8% chance per spawn.
   - Stage 3: 0.6% chance per spawn.
-- **Guarantee (Catch-up)**: If precisely **20 seconds** have passed in a stage, the score is below the skip threshold (50), and no boost has triggered yet, a Boost lantern is guaranteed to spawn.
+- **Guarantee (Catch-up)**: If precisely **20 seconds** have passed in a stage, the stage score is below 50, and no boost has triggered yet, a Boost lantern is guaranteed to spawn.
 - **Visuals**: Boost lanterns are **Yellow** (Material/Color shift from base red/purple).
 
 ### Boost State Mechanics
@@ -36,9 +36,16 @@ This phase addresses the implementation of the special "Boost" lantern type, the
   - Escaped (Height threshold): **0 points**.
 
 ### Post-Boost Logic
-- **Duration**: 10 seconds.
-- **Outcome A**: If the player reaches the 50-point stage threshold during the boost, they advance to the next intermission/stage immediately.
+- **Duration**: 10 seconds (Fixed).
+- **Threshold Completion**: If the player reaches the stage threshold during the 10-second Boost State, the game **does not** advance immediately. The player continues to play for the full 10 seconds to maximize points.
+- **Outcome A**: Once the 10 seconds expire, if the stage threshold has been met, the game advances to the next intermission/stage.
 - **Outcome B**: If 10 seconds expire and the threshold is NOT met, the game reverts to the previous stage's spawning mechanism for the remaining time of the 30s session.
+
+### Stage Thresholds & Game Over
+- **Stage 1**: 50 points. Failure to reach this by 30s results in **Game Over**.
+- **Stage 2**: Stage 1 Score + 50 points. Failure to reach this by 30s results in **Game Over**.
+- **Stage 3**: No skip threshold. The game ends naturally when the 30s timer expires.
+
 
 ### the agent's Discretion
 - **Pooling Expansion**: Ensure the object pool for lanterns can handle the increased capacity required for stacked 4-row rings in Stage 3 (up to 48 lanterns simultaneously).
