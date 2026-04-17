@@ -176,7 +176,22 @@ public class SpawnerSystem : MonoBehaviour
         lantern.transform.position = point.position + new Vector3(offset2D.x, 0f, offset2D.y);
         point.occupiedBy = lantern;
 
+        // Apply speed multiplier based on stage
+        lantern.currentSpeedMultiplier = GetSpeedMultiplierForStage();
+
         lantern.Initialize(type, mat, _lanternPool, point);
+    }
+
+    private float GetSpeedMultiplierForStage()
+    {
+        if (GameManager.Instance == null) return 1.0f;
+
+        switch (GameManager.Instance.CurrentStage)
+        {
+            case GameManager.GameStage.Stage2: return 1.5f;
+            case GameManager.GameStage.Stage3: return 2.5f;
+            default: return 1.0f;
+        }
     }
 
     private void ResetSpawnTimer() => _spawnTimer = Random.Range(minSpawnTime, maxSpawnTime);

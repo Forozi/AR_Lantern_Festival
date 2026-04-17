@@ -12,6 +12,7 @@ public class LanternBehaviour : MonoBehaviour
     [SerializeField] private float maxHeight = 8.0f;
     [SerializeField] private float swayRadius = 0.3f; // How far it drifts side-to-side
     [SerializeField] private float swaySpeed = 1.0f;  // How fast it drifts
+    public float currentSpeedMultiplier = 1.0f;
 
     [Header("References")]
     [Tooltip("Drag the 'Lantern Object' here so we can hide all meshes at once")]
@@ -65,7 +66,7 @@ public class LanternBehaviour : MonoBehaviour
         if (!_isActive) return;
 
         // 1. Move the base position straight up
-        _basePosition += Vector3.up * floatSpeed * Time.deltaTime;
+        _basePosition += Vector3.up * floatSpeed * currentSpeedMultiplier * Time.deltaTime;
 
         // 2. Calculate a smooth circular drift using Sine and Cosine
         float offsetX = Mathf.Sin((Time.time + _randomTimeOffset) * swaySpeed) * swayRadius;

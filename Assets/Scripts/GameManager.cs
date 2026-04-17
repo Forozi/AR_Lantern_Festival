@@ -4,8 +4,11 @@ public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
 
+    public enum GameStage { Stage1, Stage2, Stage3, Intermission }
+
     [Header("Game Settings")]
-    [SerializeField] private float gameTime = 30f; // total game duration
+    [SerializeField] private float stageDuration = 30f;
+    [SerializeField] private int stageSkipThreshold = 50;
     [SerializeField] private float curseChanceIncrease = 0.05f;
 
     [Header("System References")]
@@ -13,10 +16,12 @@ public class GameManager : MonoBehaviour
 
     // Public properties for UI Manager
     public int Score { get; private set; }
+    public int StageScore { get; private set; }
     public int HighScore { get; private set; }
     public float TimeRemaining { get; private set; }
     public bool IsGameOver { get; private set; }
     public bool HasGameStarted { get; private set; }
+    public GameStage CurrentStage { get; private set; }
 
     void Awake()
     {
@@ -27,31 +32,37 @@ public class GameManager : MonoBehaviour
     void Start()
     {
         HighScore = PlayerPrefs.GetInt("HighScore", 0);
-        TimeRemaining = gameTime;
+        TimeRemaining = stageDuration;
         IsGameOver = false;
         HasGameStarted = false; 
+        CurrentStage = GameStage.Stage1;
         Time.timeScale = 1f;
     }
 
     void Update()
     {
-        // Countdown when game start
-        if (!HasGameStarted || IsGameOver) return;
+        if (!HasGameStarted || IsGameOver || CurrentStage == GameStage.Intermission) return;
 
         TimeRemaining -= Time.deltaTime;
 
         if (TimeRemaining <= 0f)
         {
             TimeRemaining = 0f;
-            GameOver();
+            if (CurrentStage == GameStage.Stage3)
+            {
+                GameOver();
+            }
+            else
+            {
+                StartIntermission();
+            }
         }
     }
 
-    // called by AR Placement script
     public void StartGame()
     {
         HasGameStarted = true;
-        Debug.Log("Game Started! Timer is running.");
+        Debug.Log("Game Started! Stage: " + CurrentStage);
     }
 
     void OnEnable()
@@ -68,32 +79,84 @@ public class GameManager : MonoBehaviour
 
     private void HandleLanternHit(LanternBehaviour lantern)
     {
-        if (lantern == null || IsGameOver) return;
+        if (lantern == null || IsGameOver || CurrentStage == GameStage.Intermission) return;
 
+        int points = 0;
         if (lantern.type == LanternBehaviour.LanternType.Cursed)
-            Score += 5;
+            points = 5;
         else
-            Score -= 1;
+            points = -1;
 
-        Score = Mathf.Max(0, Score);
+        UpdateScore(points);
     }
 
     private void HandleLanternEscaped(LanternBehaviour lantern)
     {
-        if (lantern == null || IsGameOver) return;
+        if (lantern == null || IsGameOver || CurrentStage == GameStage.Intermission) return;
 
+        int points = 0;
         if (lantern.type == LanternBehaviour.LanternType.Cursed)
         {
-            Score -= 10;
+            points = -10;
             spawnerSystem.IncreaseCursedChance(curseChanceIncrease);
         }
         else if (lantern.type == LanternBehaviour.LanternType.Blessing)
         {
-            Score += 1;
+            points = 1;
         }
 
-        Score = Mathf.Max(0, Score);
+        UpdateScore(points);
     }
+
+    private void UpdateScore(int points)
+    {
+        Score += points;
+        StageScore += points;
+
+        Score = Mathf.Max(0, Score);
+        StageScore = Mathf.Max(0, StageScore);
+
+        CheckStageProgression();
+    }
+
+    private void CheckStageProgression()
+    {
+        if (CurrentStage != GameStage.Stage3 && StageScore >= stageSkipThreshold)
+        {
+            Debug.Log($"Threshold Met! Current Stage: {CurrentStage}, StageScore: {StageScore}");
+            StartIntermission();
+        }
+    }
+
+    private GameStage _lastPlayedStage;
+    private void StartIntermission()
+    {
+        _lastPlayedStage = CurrentStage;
+        CurrentStage = GameStage.Intermission;
+        spawnerSystem.ClearAllLanterns();
+        StartCoroutine(IntermissionCoroutine());
+    }
+
+    private System.Collections.IEnumerator IntermissionCoroutine()
+    {
+        Debug.Log("Intermission Started...");
+        yield return new WaitForSeconds(3f); // 3-2-1 Countdown placeholder
+        AdvanceStage();
+    }
+    private void AdvanceStage()
+    {
+        if (CurrentStage == GameStage.Intermission)
+        {
+            if (_lastPlayedStage == GameStage.Stage1) CurrentStage = GameStage.Stage2;
+            else if (_lastPlayedStage == GameStage.Stage2) CurrentStage = GameStage.Stage3;
+            else CurrentStage = GameStage.Stage1; // Fallback
+        }
+
+        TimeRemaining = stageDuration;
+        StageScore = 0;
+        Debug.Log("Advanced to: " + CurrentStage);
+    }
+
 
     private void GameOver()
     {
@@ -110,17 +173,18 @@ public class GameManager : MonoBehaviour
 
         Time.timeScale = 0f;
     }
+
     public void SoftRestart()
     {
         Score = 0;
-        TimeRemaining = gameTime; // Reset to 30s
+        StageScore = 0;
+        TimeRemaining = stageDuration;
         IsGameOver = false;
         HasGameStarted = false;
+        CurrentStage = GameStage.Stage1;
         Time.timeScale = 1f;
 
-        // Tell the spawner to clean up the sky
         spawnerSystem.ClearAllLanterns();
-
         Debug.Log("Game State Reset.");
     }
-}
+}
