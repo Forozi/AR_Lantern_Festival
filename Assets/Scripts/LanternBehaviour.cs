@@ -4,7 +4,7 @@ using UnityEngine.Pool;
 
 public class LanternBehaviour : MonoBehaviour
 {
-    public enum LanternType { Blessing, Cursed }
+    public enum LanternType { Blessing, Cursed, Boost }
     public LanternType type;
 
     [Header("Settings")]

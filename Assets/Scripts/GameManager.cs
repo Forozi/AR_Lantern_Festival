@@ -23,6 +23,12 @@ public class GameManager : MonoBehaviour
     public bool HasGameStarted { get; private set; }
     public GameStage CurrentStage { get; private set; }
 
+    private bool _isBoostActive = false;
+    private bool _hasBoostTriggeredThisStage = false;
+    private int _stage1FinalScore = 0;
+
+    public bool IsBoostActive => _isBoostActive;
+
     void Awake()
     {
         if (Instance == null) Instance = this;
@@ -36,26 +42,52 @@ public class GameManager : MonoBehaviour
         IsGameOver = false;
         HasGameStarted = false; 
         CurrentStage = GameStage.Stage1;
+        _isBoostActive = false;
+        _hasBoostTriggeredThisStage = false;
         Time.timeScale = 1f;
     }
 
     void Update()
     {
-        if (!HasGameStarted || IsGameOver || CurrentStage == GameStage.Intermission) return;
+        if (!HasGameStarted || IsGameOver || CurrentStage == GameStage.Intermission || _isBoostActive) return;
 
         TimeRemaining -= Time.deltaTime;
 
         if (TimeRemaining <= 0f)
         {
             TimeRemaining = 0f;
-            if (CurrentStage == GameStage.Stage3)
-            {
-                GameOver();
-            }
-            else
+            HandleTimeExpiration();
+        }
+    }
+
+    private void HandleTimeExpiration()
+    {
+        if (CurrentStage == GameStage.Stage3)
+        {
+            GameOver();
+        }
+        else
+        {
+            // Check if threshold met
+            if (StageScore >= CurrentThreshold())
             {
                 StartIntermission();
             }
+            else
+            {
+                Debug.Log($"Failed to reach threshold {CurrentThreshold()} in {CurrentStage}. Game Over.");
+                GameOver();
+            }
+        }
+    }
+
+    public int CurrentThreshold()
+    {
+        switch (CurrentStage)
+        {
+            case GameStage.Stage1: return 50;
+            case GameStage.Stage2: return _stage1FinalScore + 50;
+            default: return int.MaxValue; // Stage 3 doesn't skip
         }
     }
 
@@ -81,11 +113,25 @@ public class GameManager : MonoBehaviour
     {
         if (lantern == null || IsGameOver || CurrentStage == GameStage.Intermission) return;
 
+        // Special case: Boost Trigger lantern
+        if (lantern.type == LanternBehaviour.LanternType.Boost && !_isBoostActive)
+        {
+            ActivateBoostMode();
+            return;
+        }
+
         int points = 0;
-        if (lantern.type == LanternBehaviour.LanternType.Cursed)
-            points = 5;
+        if (_isBoostActive)
+        {
+            points = 10;
+        }
         else
-            points = -1;
+        {
+            if (lantern.type == LanternBehaviour.LanternType.Cursed)
+                points = 5;
+            else
+                points = -1;
+        }
 
         UpdateScore(points);
     }
@@ -95,14 +141,21 @@ public class GameManager : MonoBehaviour
         if (lantern == null || IsGameOver || CurrentStage == GameStage.Intermission) return;
 
         int points = 0;
-        if (lantern.type == LanternBehaviour.LanternType.Cursed)
+        if (_isBoostActive)
         {
-            points = -10;
-            spawnerSystem.IncreaseCursedChance(curseChanceIncrease);
+            points = 0; // No penalty during boost
         }
-        else if (lantern.type == LanternBehaviour.LanternType.Blessing)
+        else
         {
-            points = 1;
+            if (lantern.type == LanternBehaviour.LanternType.Cursed)
+            {
+                points = -10;
+                spawnerSystem.IncreaseCursedChance(curseChanceIncrease);
+            }
+            else if (lantern.type == LanternBehaviour.LanternType.Blessing)
+            {
+                points = 1;
+            }
         }
 
         UpdateScore(points);
@@ -121,9 +174,47 @@ public class GameManager : MonoBehaviour
 
     private void CheckStageProgression()
     {
-        if (CurrentStage != GameStage.Stage3 && StageScore >= stageSkipThreshold)
+        // Don't advance during boost! Player plays full 10s.
+        if (_isBoostActive) return;
+
+        if (CurrentStage != GameStage.Stage3 && StageScore >= CurrentThreshold())
         {
             Debug.Log($"Threshold Met! Current Stage: {CurrentStage}, StageScore: {StageScore}");
+            StartIntermission();
+        }
+    }
+
+    public void ActivateBoostMode()
+    {
+        if (_hasBoostTriggeredThisStage) return;
+
+        _isBoostActive = true;
+        _hasBoostTriggeredThisStage = true;
+        
+        Debug.Log("BOOST MODE ACTIVATED!");
+        spawnerSystem.ClearAllLanterns();
+        StartCoroutine(BoostStateCoroutine());
+    }
+
+    private System.Collections.IEnumerator BoostStateCoroutine()
+    {
+        // Tell spawner to start specialized patterns
+        spawnerSystem.StartBoostSpawning();
+
+        float boostTimer = 10f;
+        while (boostTimer > 0)
+        {
+            boostTimer -= Time.deltaTime;
+            // We can add a specialized UI timer here later
+            yield return null;
+        }
+
+        _isBoostActive = false;
+        Debug.Log("Boost Mode Ended.");
+
+        // After boost ends, check if we should leap immediately
+        if (StageScore >= CurrentThreshold() && CurrentStage != GameStage.Stage3)
+        {
             StartIntermission();
         }
     }
@@ -131,9 +222,12 @@ public class GameManager : MonoBehaviour
     private GameStage _lastPlayedStage;
     private void StartIntermission()
     {
+        if (CurrentStage == GameStage.Stage1) _stage1FinalScore = StageScore;
+
         _lastPlayedStage = CurrentStage;
         CurrentStage = GameStage.Intermission;
         spawnerSystem.ClearAllLanterns();
+        _hasBoostTriggeredThisStage = false; // Reset for next stage
         StartCoroutine(IntermissionCoroutine());
     }
 
@@ -149,7 +243,6 @@ public class GameManager : MonoBehaviour
         {
             if (_lastPlayedStage == GameStage.Stage1) CurrentStage = GameStage.Stage2;
             else if (_lastPlayedStage == GameStage.Stage2) CurrentStage = GameStage.Stage3;
-            else CurrentStage = GameStage.Stage1; // Fallback
         }
 
         TimeRemaining = stageDuration;
@@ -182,9 +275,11 @@ public class GameManager : MonoBehaviour
         IsGameOver = false;
         HasGameStarted = false;
         CurrentStage = GameStage.Stage1;
+        _isBoostActive = false;
+        _hasBoostTriggeredThisStage = false;
         Time.timeScale = 1f;
 
         spawnerSystem.ClearAllLanterns();
         Debug.Log("Game State Reset.");
     }
-}
+}

@@ -19,6 +19,7 @@ public class SpawnerSystem : MonoBehaviour
     [Header("Visuals")]
     [SerializeField] private Material cursedMaterial;
     [SerializeField] private Material blessedMaterial;
+    [SerializeField] private Material boostMaterial;
 
     [Header("Spawn Config")]
     [SerializeField] private int numberOfSpawnPoints = 12;
@@ -53,8 +54,9 @@ public class SpawnerSystem : MonoBehaviour
     private float _waveTimer;
     void Awake()
     {
+        // Increase pool max to 60 for multi-row boost patterns
         _lanternPool = new ObjectPool<LanternBehaviour>(
-            CreateLantern, null, OnReleaseLantern, OnDestroyLantern, true, 12, 20
+            CreateLantern, null, OnReleaseLantern, OnDestroyLantern, true, 20, 60
         );
 
         _spawnPointOffsets = new Vector3[numberOfSpawnPoints];
@@ -104,6 +106,9 @@ public class SpawnerSystem : MonoBehaviour
     {
         if (!_isInitialized || GameManager.Instance.IsGameOver) return;
 
+        // Skip normal spawning during boost mode
+        if (GameManager.Instance.IsBoostActive) return;
+
         _waveTimer -= Time.deltaTime;
 
         // Every 5 seconds, spawn a batch!
@@ -112,25 +117,40 @@ public class SpawnerSystem : MonoBehaviour
             SpawnBatch(lanternsPerWave);
             _waveTimer = waveInterval; // Reset timer for the next 5 seconds
         }
+
+        CheckForBoostGuarantee();
+    }
+
+    private void CheckForBoostGuarantee()
+    {
+        // 20s mark guarantee (Timer starts at 30s, so check when it reaches 10s)
+        if (Mathf.Abs(GameManager.Instance.TimeRemaining - 10.0f) < 0.1f)
+        {
+            if (GameManager.Instance.StageScore < GameManager.Instance.CurrentThreshold())
+            {
+                // Force a boost lantern if one hasn't spawned yet
+                SpawnBoostTrigger();
+            }
+        }
+    }
+
+    private void SpawnBoostTrigger()
+    {
+        // Try to find a free point to force the trigger
+        foreach (var point in _spawnPoints)
+        {
+            if (!point.IsOccupied)
+            {
+                SpawnAt(point, forceBoost: true);
+                return;
+            }
+        }
     }
 
     public void IncreaseCursedChance(float amount)
     {
         cursedLanternChance = Mathf.Clamp01(cursedLanternChance + amount);
     }
-
-    //private void HandleLanternEvent(LanternBehaviour lantern)
-    //{
-    //    if (GameManager.Instance.IsGameOver) return;
-    //    StartCoroutine(SpawnWave());
-    //}
-
-    //private IEnumerator SpawnWave()
-    //{
-    //    TrySpawnLantern();
-    //    yield return new WaitForSeconds(secondWaveDelay);
-    //    TrySpawnLantern();
-    //}
 
     private void TrySpawnLantern()
     {
@@ -164,11 +184,24 @@ public class SpawnerSystem : MonoBehaviour
         _currentSpawnIndex = 0;
     }
 
-    private void SpawnAt(SpawnPoint point)
+    private void SpawnAt(SpawnPoint point, bool forceBoost = false)
     {
-        bool isCursed = Random.value < cursedLanternChance;
-        var type = isCursed ? LanternBehaviour.LanternType.Cursed : LanternBehaviour.LanternType.Blessing;
-        var mat = isCursed ? cursedMaterial : blessedMaterial;
+        bool isBoost = forceBoost || (Random.value < GetBoostChanceForStage());
+        
+        LanternBehaviour.LanternType type;
+        Material mat;
+
+        if (isBoost)
+        {
+            type = LanternBehaviour.LanternType.Boost;
+            mat = boostMaterial;
+        }
+        else
+        {
+            bool isCursed = Random.value < cursedLanternChance;
+            type = isCursed ? LanternBehaviour.LanternType.Cursed : LanternBehaviour.LanternType.Blessing;
+            mat = isCursed ? cursedMaterial : blessedMaterial;
+        }
 
         LanternBehaviour lantern = _lanternPool.Get();
         Vector2 offset2D = Random.insideUnitCircle * spawnOffsetRadius;
@@ -176,10 +209,59 @@ public class SpawnerSystem : MonoBehaviour
         lantern.transform.position = point.position + new Vector3(offset2D.x, 0f, offset2D.y);
         point.occupiedBy = lantern;
 
-        // Apply speed multiplier based on stage
         lantern.currentSpeedMultiplier = GetSpeedMultiplierForStage();
-
         lantern.Initialize(type, mat, _lanternPool, point);
+    }
+
+    private float GetBoostChanceForStage()
+    {
+        if (GameManager.Instance == null) return 0.01f;
+        
+        switch (GameManager.Instance.CurrentStage)
+        {
+            case GameManager.GameStage.Stage2: return 0.008f;
+            case GameManager.GameStage.Stage3: return 0.006f;
+            default: return 0.01f;
+        }
+    }
+
+    public void StartBoostSpawning()
+    {
+        _isInitialized = true; // Ensure we are active
+        StopAllCoroutines();
+        StartCoroutine(BoostSpawningCoroutine());
+    }
+
+    private IEnumerator BoostSpawningCoroutine()
+    {
+        int rowCount = 2;
+        if (GameManager.Instance.CurrentStage == GameManager.GameStage.Stage2) rowCount = 3;
+        else if (GameManager.Instance.CurrentStage == GameManager.GameStage.Stage3) rowCount = 4;
+
+        float rowHeightGap = 0.5f;
+
+        // Immediately spawn X rows
+        for (int r = 0; r < rowCount; r++)
+        {
+            SpawnBoostRow(r * rowHeightGap);
+            yield return new WaitForSeconds(0.2f); // Slight stagger for visual effect
+        }
+    }
+
+    private void SpawnBoostRow(float heightOffset)
+    {
+        foreach (var point in _spawnPoints)
+        {
+            LanternBehaviour lantern = _lanternPool.Get();
+            Vector2 ringOffset = Random.insideUnitCircle * 0.2f; // Tighter ring
+            
+            Vector3 spawnPos = point.position + new Vector3(ringOffset.x, heightOffset, ringOffset.y);
+            lantern.transform.position = spawnPos;
+            
+            // Note: In Boost mode, we don't occupy spawn points strictly to allow overlapping rings
+            lantern.currentSpeedMultiplier = GetSpeedMultiplierForStage();
+            lantern.Initialize(LanternBehaviour.LanternType.Boost, boostMaterial, _lanternPool, null);
+        }
     }
 
     private float GetSpeedMultiplierForStage()
@@ -205,30 +287,39 @@ public class SpawnerSystem : MonoBehaviour
     }
 
     private void OnDestroyLantern(LanternBehaviour lantern) => Destroy(lantern.gameObject);
+
     public void ClearAllLanterns()
     {
-        // 1. Lock the spawner
-        _isInitialized = false;
-
-        // 2. === CRITICAL FIX === Kill any pending Coroutines (delayed spawns)
-        //StopAllCoroutines();
-
-        // 3. Return all currently active lanterns to the pool
+        // Return all currently active lanterns to the pool
         foreach (var point in _spawnPoints)
         {
             if (point.occupiedBy != null)
             {
                 LanternBehaviour lantern = point.occupiedBy;
-                point.occupiedBy = null; // Free up the spawn point
-                _lanternPool.Release(lantern); // Send the lantern away
+                point.occupiedBy = null;
+                _lanternPool.Release(lantern);
             }
         }
 
-        // 4. Reset difficulty
-        cursedLanternChance = 0.2f;
-        Debug.Log("Spawner Reset. All lanterns cleared and coroutines killed.");
+        // Also search for any "un-pointed" lanterns (like Boost rows) that might be floating
+        // This is a bit tricky with ObjectPool unless we track active list.
+        // For simplicity, I'll rely on the fact that most will be in spawn points or 
+        // I can use FindObjectsOfType if performance allows (small amount of objects).
+        LanternBehaviour[] active = FindObjectsOfType<LanternBehaviour>();
+        foreach (var l in active)
+        {
+            if (l.gameObject.activeInHierarchy)
+            {
+                // We can't easily Release if we don't have the reference, but Shoot() or Despawn() works
+                // But let's just use a tag or a list in a real scenario.
+                // For this prototype, I'll just deactivate them.
+                l.gameObject.SetActive(false);
+            }
+        }
+
+        Debug.Log("Spawner Cleared.");
     }
-    // === NEW METHOD ===
+
     private void SpawnBatch(int amount)
     {
         for (int i = 0; i < amount; i++)
@@ -237,15 +328,9 @@ public class SpawnerSystem : MonoBehaviour
         }
     }
 
-    // === UPDATED EVENT HANDLER ===
     private void HandleLanternEvent(LanternBehaviour lantern)
     {
-        if (GameManager.Instance.IsGameOver) return;
-
-        // If a player shoots a lantern, instantly spawn 1 (or more) as "revenge"
-        // This keeps the screen busy even between the 5-second waves!
+        if (GameManager.Instance.IsGameOver || GameManager.Instance.IsBoostActive) return;
         SpawnBatch(revengeSpawns);
     }
-
-    // You can now DELETE the old "private IEnumerator SpawnWave()" completely!
-}
+}
